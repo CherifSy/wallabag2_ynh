@@ -28,6 +28,7 @@ app=$YNH_APP_INSTANCE_NAME
 db_name=$(ynh_app_setting_get "$app" db_name)
 db_pwd=$(ynh_app_setting_get "$app" mysqlpwd)
 db_user="$db_name"
+final_path=$(ynh_app_setting_get "$app" final_path)
 
 #=================================================
 # CHECK PATHS SYNTAX
@@ -65,35 +66,18 @@ nginx_conf_path=/etc/nginx/conf.d/$old_domain.d/$app.conf
 # Change the path in the nginx config file
 if [ $change_path -eq 1 ]
 then
-  # Make a backup of the original nginx config file if modified
-  ynh_backup_if_checksum_is_different "$nginx_conf_path"
-  if [ "$new_path" = "/" ] && [ "$old_path" != "/" ] ; then
-    # Replace path in several location occurrences based on different recognition patterns
-    ynh_replace_string "location $old_path/ {\$" "location / {" "$nginx_conf_path"
-    ynh_replace_string "location ~ ^$old_path" "location ~ ^" "$nginx_conf_path"
-    ynh_replace_string "location $old_path {" "location / {" "$nginx_conf_path"
-    ynh_replace_string "rewrite ^ $old_path" "rewrite ^ " "$nginx_conf_path"
-    
-    # Move #for-subdir comment at the beginning of the line (line not needed for "/" path)
-    ynh_replace_string "\(.*\) #for-subdir" "#for-subdir \1" "$nginx_conf_path"
-    elif [ "$new_path" != "/" ] && [ "$old_path" = "/" ] ; then
-    # Move #for-subdir comment at the end of the line (line needed for "/path" path)
-    ynh_replace_string "#for-subdir\(.*\)" "\1 #for-subdir" "$nginx_conf_path"
-    
-    # Replace path in several location occurrences based on different recognition patterns
-    ynh_replace_string "location / {\$" "location $new_path/ {" "$nginx_conf_path"
-    ynh_replace_string "location ~ ^" "location ~ ^$new_path" "$nginx_conf_path"
-    ynh_replace_string "location / {" "location $new_path {" "$nginx_conf_path"
-    ynh_replace_string "rewrite ^ /" "rewrite ^ $new_path/" "$nginx_conf_path"
-  else
-    # Replace locations starting with old_path
-    # Look for every possible patterns for location directive(see https://nginx.org/en/docs/http/ngx_http_core_module.html#location)
-    ynh_replace_string "location\( \(=\|~\|~\*\|\^~\)\)\? \(\^\)\?$old_path" "location\1 \3$new_path" "$nginx_conf_path"
-    # Replace path in "rewrite" directive
-    ynh_replace_string "rewrite ^ $old_path" "rewrite ^ $new_path" "$nginx_conf_path"
-  fi
-  # Calculate and store the nginx config file checksum
-  ynh_store_file_checksum "$nginx_conf_path"
+	domain="$old_domain"
+	path_url="$new_path"
+	ynh_add_nginx_config
+	if [ "$path_url" = "/" ]
+	then
+	  # Replace "//" location (due to nginx template)
+	  # Prevent from replacing in "http://" expressions by excluding ":" as preceding character
+	  sed --in-place "s@\([^:]\)//@\1/@g" /etc/nginx/conf.d/$domain.d/$app.conf
+	else
+	  # Move prefix comment #for-subdir at end of lines
+	  sed --in-place "s/#for-subdir\(.*\)/\1 #for-subdir/g" /etc/nginx/conf.d/$domain.d/$app.conf
+	fi
 fi
 
 # Change the domain for nginx
